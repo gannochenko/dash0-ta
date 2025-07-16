@@ -14,6 +14,7 @@ import (
 	"log-processor/internal/grpc"
 	"log-processor/internal/lib"
 	"log-processor/internal/lib/otel"
+	"log-processor/internal/services/attribute_processor"
 	"log-processor/internal/services/config"
 )
 
@@ -36,12 +37,15 @@ func run(w io.Writer) error {
 	}
 	defer shutdownOtel(ctx)
 
-	grpcServer := grpc.NewServer(configService, log)
+	attributeProcessorService := attribute_processor.New(configService)
+	grpcServer := grpc.NewServer(configService, log, attributeProcessorService)
 
 	var shutdownSequenceWg sync.WaitGroup
 	shutdownSequenceWg.Add(1)
 
 	return lib.Run(ctx, func() error {
+		attributeProcessorService.Start(ctx)
+
 		go func() {
 			err := grpcServer.Start(ctx)
 			if err != nil {
@@ -56,6 +60,8 @@ func run(w io.Writer) error {
 		cancel()
 		shutdownOtel(ctx)
 		grpcServer.Stop()
+
+		attributeProcessorService.Stop()
 
 		shutdownSequenceWg.Wait()
 		return nil

@@ -3,7 +3,8 @@ package logcollector
 import (
 	"context"
 	"fmt"
-	"log"
+	"log-processor/internal/domain"
+	"log-processor/internal/interfaces"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	v1 "go.opentelemetry.io/proto/otlp/common/v1"
@@ -11,15 +12,17 @@ import (
 
 type Controller struct {
 	collogspb.UnimplementedLogsServiceServer
+	attributeProcessorService interfaces.AttributeProcessorService
 }
 
-func New() collogspb.LogsServiceServer {
-	return &Controller{}
+func New(attributeProcessorService interfaces.AttributeProcessorService) collogspb.LogsServiceServer {
+	return &Controller{
+		attributeProcessorService: attributeProcessorService,
+	}
 }
 
 func (l *Controller) Export(ctx context.Context, request *collogspb.ExportLogsServiceRequest) (*collogspb.ExportLogsServiceResponse, error) {
-	// Map structure: attribute_key -> value_string -> count
-	attributes := make(map[string]map[string]int32)
+	attributes := make(domain.AttributeAggregation)
 
 	recordAttribute := func(key, value string) {
 		if attributes[key] == nil {
@@ -27,7 +30,7 @@ func (l *Controller) Export(ctx context.Context, request *collogspb.ExportLogsSe
 		}
 		attributes[key][value]++
 	}
-	
+
 	for _, resourceLog := range request.ResourceLogs {
 		if resourceLog.Resource != nil {
 			for _, attr := range resourceLog.Resource.Attributes {
@@ -53,12 +56,8 @@ func (l *Controller) Export(ctx context.Context, request *collogspb.ExportLogsSe
 		}
 	}
 
-	// Log the final attribute statistics
-	for attrKey, values := range attributes {
-		log.Printf("Attribute '%s':", attrKey)
-		for value, count := range values {
-			log.Printf("  '%s': %d occurrences", value, count)
-		}
+	if err := l.attributeProcessorService.Process(attributes); err != nil {
+		return nil, err
 	}
 
 	return &collogspb.ExportLogsServiceResponse{}, nil

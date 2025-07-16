@@ -10,4 +10,5 @@ type Config struct {
 	AttributeName         string `envconfig:"ATTRIBUTE_NAME" desc:"attribute name"`
 	WindowSize            int    `envconfig:"WINDOW_SIZE" default:"1000" desc:"window size in seconds"`
 	GRPC                  GRPCConfig `envconfig:"GRPC"`
+	WorkerCount           int    `envconfig:"WORKER_COUNT" default:"5" desc:"number of workers"`
 }

@@ -20,11 +20,11 @@ type Server struct {
 	log *slog.Logger
 }
 
-func NewServer(configService interfaces.ConfigService, log *slog.Logger) *Server {
+func NewServer(configService interfaces.ConfigService, log *slog.Logger, attributeProcessorService interfaces.AttributeProcessorService) *Server {
 	opts := grpc.ChainUnaryInterceptor(
-		// todo: add all these interceptors
 		GetRequestLogger(log),
 		MapError,
+				// todo: add all these interceptors
 		// grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// grpc.MaxRecvMsgSize(configService.GetConfig().GRPC.MaxReceiveMessageSize),
 		// grpc.Creds(insecure.NewCredentials()),
@@ -32,7 +32,7 @@ func NewServer(configService interfaces.ConfigService, log *slog.Logger) *Server
 	grpcServer := grpc.NewServer(opts)
 
 	// controllers
-	logCollectorControllerV1 := logcollector.New()
+	logCollectorControllerV1 := logcollector.New(attributeProcessorService)
 
 	collogspb.RegisterLogsServiceServer(grpcServer, logCollectorControllerV1)
 
