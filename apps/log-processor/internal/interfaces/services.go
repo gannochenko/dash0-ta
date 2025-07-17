@@ -10,5 +10,5 @@ type ConfigService interface {
 }
 
 type AttributeProcessorService interface {
-	Process(attributes domain.AttributeAggregation) error
+	SubmitJob(job domain.LogJob) error
 }

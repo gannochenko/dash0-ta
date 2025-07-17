@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log-processor/internal/domain"
 	"log-processor/internal/interfaces"
+	"log-processor/internal/proto"
 	"log/slog"
 	"sync"
 	"time"
@@ -14,17 +15,15 @@ type Service struct {
 	config interfaces.ConfigService
 	log *slog.Logger
 
-	flushTicker  *time.Ticker
-	flushCh      chan struct{}
-
-	workerCount int
-	jobsCh        chan domain.AttributeAggregation
-
-	reconcilerTicker *time.Ticker
-	reconcileCh chan domain.AttributeAggregation
-
 	workersWg     sync.WaitGroup
-	quit        chan struct{}
+
+	jobsCh chan domain.LogJob
+	valueCh chan string
+	quit chan struct{}
+
+	flushTicker *time.Ticker
+
+	aggregation map[string]int32
 }
 
 func New(config interfaces.ConfigService, log *slog.Logger) *Service {
@@ -32,22 +31,18 @@ func New(config interfaces.ConfigService, log *slog.Logger) *Service {
 		config: config,
 		log: log,
 
-		flushCh: make(chan struct{}),
-		reconcileCh: make(chan domain.AttributeAggregation, config.GetConfig().WorkerCount),
+		jobsCh: make(chan domain.LogJob),
+		valueCh: make(chan string),
+		quit: make(chan struct{}),
 
-		// Initialize worker pool
-		workerCount: config.GetConfig().WorkerCount,
-		jobsCh:        make(chan domain.AttributeAggregation),
-		quit:        make(chan struct{}),
+		aggregation: make(map[string]int32),
 	}
 }
 
-func (s *Service) Process(attributes domain.AttributeAggregation) error {
+func (s *Service) SubmitJob(job domain.LogJob) error {
 	select {
-	case s.jobsCh <- attributes:
+	case s.jobsCh <- job:
 		return nil
-	case <-s.quit:
-		return context.Canceled
 	default:
 		return context.DeadlineExceeded // can't write to the channel, nobody is reading
 	}
@@ -55,83 +50,53 @@ func (s *Service) Process(attributes domain.AttributeAggregation) error {
 
 // Start initializes and starts the worker pool
 func (s *Service) Start(ctx context.Context) {
-	for i := 0; i < s.workerCount; i++ {
+	s.log.Debug("Starting worker pool", "workerCount", s.config.GetConfig().WorkerCount)
+
+	for i := 0; i < s.config.GetConfig().WorkerCount; i++ {
 		s.workersWg.Add(1)
 		go s.worker(ctx, i)
 	}
 
+	s.workersWg.Add(1)
+	go s.aggregator(ctx)
+
 	s.flushTicker = time.NewTicker(time.Duration(s.config.GetConfig().WindowSize) * time.Second)
-
-    go func() {
-        for {
-            select {
-			case <-ctx.Done():
-				return
-			case <-s.quit:
-				return
-            case <-s.flushTicker.C:
-                fmt.Println("=== FLUSH SIGNAL ===")
-                // Broadcast to all workers
-                for i := 0; i < s.workerCount; i++ {
-                    select {
-                    case s.flushCh <- struct{}{}:
-                    default: // Non-blocking send
-                    }
-                }
-            }
-        }
-    }()
-
-	s.reconcilerTicker = time.NewTicker(100 * time.Millisecond)
-
-	// reconciler
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.quit:
-				return
-			case <-s.reconcilerTicker.C:
-				if len(s.reconcileCh) == cap(s.reconcileCh) {
-					resultBuffer := make(domain.AttributeAggregation)
-					for len(s.reconcileCh) > 0 {
-						partialBuffer, ok := <-s.reconcileCh
-						if !ok {
-							return // Channel closed, reconciler should exit
-						}
-						s.mergeAggregations(partialBuffer, resultBuffer)
-					}
-
-					s.log.Info("Reconciler sends data: \n")
-
-					// for attrKey, values := range resultBuffer {
-					// 	s.log.Info("Attribute '%s':", attrKey)
-					// 	for value, count := range values {
-					// 		log.Printf("'%s': %d occurrences", value, count)
-					// 	}
-					// }
-				}
-			}
-		}
-	}()
 }
 
 // Stop gracefully shuts down the worker pool
 func (s *Service) Stop() {
 	close(s.quit)
 	close(s.jobsCh)
-	close(s.reconcileCh)
-	s.workersWg.Wait()
+	close(s.valueCh)
 	s.flushTicker.Stop()
-	s.reconcilerTicker.Stop()
+
+	s.workersWg.Wait()
 }
 
 // worker processes jobs from the job queue
-func (s *Service) worker(ctx context.Context, _ int) {
+func (s *Service) worker(ctx context.Context, workerID int) {
 	defer s.workersWg.Done()
 
-	localBuffer := make(domain.AttributeAggregation)
+	s.log.Debug("Starting worker", "worker", workerID)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-s.jobsCh:
+			if !ok {
+				return
+			}
+
+			s.log.Debug("Processing job", "job", job, "worker", workerID)
+
+			s.extractAttribute(job)
+		}
+	}
+}
+
+func (s *Service) aggregator(ctx context.Context) {
+	defer s.workersWg.Done()
 
 	for {
 		select {
@@ -139,34 +104,54 @@ func (s *Service) worker(ctx context.Context, _ int) {
 			return
 		case <-s.quit:
 			return
-		case _, ok := <-s.flushCh:
+		case <-s.flushTicker.C:
+			s.printAggregation()
+			s.aggregation = make(map[string]int32)
+		case value, ok := <-s.valueCh:
 			if !ok {
-				return // Channel closed, worker should exit
+				return
 			}
-			// log.Printf("Worker %d: Flushing local buffer (%d)", workerID, len(localBuffer))
-			select {
-			case s.reconcileCh <- localBuffer:
-			default:
-				// nobody is listening
-			}
-			localBuffer = make(domain.AttributeAggregation)
-		case job, ok := <-s.jobsCh:
-			if !ok {
-				return // Channel closed, worker should exit
-			}
-			// log.Printf("Worker %d: Processing job", workerID)
-			s.mergeAggregations(job, localBuffer)
+
+			s.aggregation[value]++
 		}
 	}
 }
 
-func (s *Service) mergeAggregations(job domain.AttributeAggregation, localBuffer domain.AttributeAggregation) {
-	for key, values := range job {
-		for value, count := range values {
-			if _, exists := localBuffer[key]; !exists {
-				localBuffer[key] = make(map[string]int32)
+func (s *Service) extractAttribute(job domain.LogJob) {
+	attributeName := s.config.GetConfig().AttributeName
+
+	for _, resourceLog := range job {
+		if resourceLog.Resource != nil {
+			for _, attr := range resourceLog.Resource.Attributes {
+				if attr.Key == attributeName {
+					s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+				}
 			}
-			localBuffer[key][value] += count
 		}
+
+		for _, scopeLog := range resourceLog.ScopeLogs {
+			if scopeLog.Scope != nil {
+				for _, attr := range scopeLog.Scope.Attributes {
+					if attr.Key == attributeName {
+						s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+					}
+				}
+			}
+
+			for _, logRecord := range scopeLog.LogRecords {
+				for _, attr := range logRecord.Attributes {
+					if attr.Key == attributeName {
+						s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *Service) printAggregation() {
+	fmt.Println("==== Aggregation ====")
+	for value, count := range s.aggregation {
+		fmt.Printf("Value: %s, Count: %d\n", value, count)
 	}
 }

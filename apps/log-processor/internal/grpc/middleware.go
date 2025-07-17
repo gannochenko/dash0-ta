@@ -55,8 +55,7 @@ func GetRequestLogger(log *slog.Logger) grpc.UnaryServerInterceptor {
 				log.ErrorContext(ctx, errors.Wrap(err, "request handled with error").Error(), grpcRequestAttr, requestDataAttr)
 			}
 		} else {
-			// todo: uncomment this
-			//log.InfoContext(ctx, "request handled", grpcRequestAttr, requestDataAttr)
+			log.DebugContext(ctx, "request handled", grpcRequestAttr, requestDataAttr)
 		}
 
 		return resp, err
