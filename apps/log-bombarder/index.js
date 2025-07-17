@@ -9,8 +9,8 @@ const client = new grpc.Client();
 client.load(["proto"], "logs_service.proto");
 
 export const options = {
-  vus: 10, // 10 virtual users
-  duration: "30s", // run for 30 seconds
+  vus: __ENV.VUS ? parseInt(__ENV.VUS) : 10, // configurable via CLI: k6 run -e VUS=20
+  duration: __ENV.DURATION || "30s", // configurable via CLI: k6 run -e DURATION=1m
 };
 
 // Helper function to generate random hex string
@@ -21,25 +21,6 @@ function randomHex(length) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
-}
-
-// Helper function to generate trace ID (32 hex chars)
-function generateTraceId() {
-  return randomHex(32);
-}
-
-// Helper function to generate span ID (16 hex chars)
-function generateSpanId() {
-  return randomHex(16);
-}
-
-// Helper function to convert hex string to Uint8Array
-function hexToBytes(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-  }
-  return bytes;
 }
 
 // Generate random log data in the format specified by the user

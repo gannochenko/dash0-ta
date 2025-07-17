@@ -4,14 +4,15 @@ services:
     ports:
       - "8080:8080" # HTTP metrics endpoint
       - "443:443" # gRPC endpoint
-    environment:
-      - LOG_PROCESSOR_HTTP_ADDR=:8080
-      - LOG_PROCESSOR_GRPC_ADDR=:443
+    env_file:
+      - .env.local
     networks:
       - monitoring
 
   prometheus:
     image: prom/prometheus:latest
+    logging:
+      driver: "none"
     container_name: prometheus
     ports:
       - "9090:9090"
@@ -29,6 +30,8 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    logging:
+      driver: "none"
     container_name: grafana
     ports:
       - "3000:3000"

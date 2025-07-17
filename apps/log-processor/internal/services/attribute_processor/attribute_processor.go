@@ -3,15 +3,16 @@ package attribute_processor
 import (
 	"context"
 	"fmt"
-	"log"
 	"log-processor/internal/domain"
 	"log-processor/internal/interfaces"
+	"log/slog"
 	"sync"
 	"time"
 )
 
 type Service struct {
 	config interfaces.ConfigService
+	log *slog.Logger
 
 	flushTicker  *time.Ticker
 	flushCh      chan struct{}
@@ -26,9 +27,10 @@ type Service struct {
 	quit        chan struct{}
 }
 
-func New(config interfaces.ConfigService) *Service {
+func New(config interfaces.ConfigService, log *slog.Logger) *Service {
 	return &Service{
 		config: config,
+		log: log,
 
 		flushCh: make(chan struct{}),
 		reconcileCh: make(chan domain.AttributeAggregation, config.GetConfig().WorkerCount),
@@ -65,6 +67,8 @@ func (s *Service) Start(ctx context.Context) {
             select {
 			case <-ctx.Done():
 				return
+			case <-s.quit:
+				return
             case <-s.flushTicker.C:
                 fmt.Println("=== FLUSH SIGNAL ===")
                 // Broadcast to all workers
@@ -74,8 +78,6 @@ func (s *Service) Start(ctx context.Context) {
                     default: // Non-blocking send
                     }
                 }
-			case <-s.quit:
-				return
             }
         }
     }()
@@ -101,13 +103,14 @@ func (s *Service) Start(ctx context.Context) {
 						s.mergeAggregations(partialBuffer, resultBuffer)
 					}
 
-					log.Printf("Reconciler: \n")
-					for attrKey, values := range resultBuffer {
-						log.Printf("Attribute '%s':", attrKey)
-						for value, count := range values {
-							log.Printf("'%s': %d occurrences", value, count)
-						}
-					}
+					s.log.Info("Reconciler sends data: \n")
+
+					// for attrKey, values := range resultBuffer {
+					// 	s.log.Info("Attribute '%s':", attrKey)
+					// 	for value, count := range values {
+					// 		log.Printf("'%s': %d occurrences", value, count)
+					// 	}
+					// }
 				}
 			}
 		}
@@ -118,42 +121,41 @@ func (s *Service) Start(ctx context.Context) {
 func (s *Service) Stop() {
 	close(s.quit)
 	close(s.jobsCh)
+	close(s.reconcileCh)
 	s.workersWg.Wait()
 	s.flushTicker.Stop()
 	s.reconcilerTicker.Stop()
-	// close(s.results)
 }
 
 // worker processes jobs from the job queue
-func (s *Service) worker(ctx context.Context, workerID int) {
+func (s *Service) worker(ctx context.Context, _ int) {
 	defer s.workersWg.Done()
-	
-	// todo: add local map here
+
 	localBuffer := make(domain.AttributeAggregation)
 
 	for {
 		select {
-		case job, ok := <-s.jobsCh:
-			if !ok {
-				return // Channel closed, worker should exit
-			}
-			log.Printf("Worker %d: Processing job", workerID)
-			s.mergeAggregations(job, localBuffer)
+		case <-ctx.Done():
+			return
+		case <-s.quit:
+			return
 		case _, ok := <-s.flushCh:
 			if !ok {
 				return // Channel closed, worker should exit
 			}
-			log.Printf("Worker %d: Flushing local buffer (%d)", workerID, len(localBuffer))
+			// log.Printf("Worker %d: Flushing local buffer (%d)", workerID, len(localBuffer))
 			select {
 			case s.reconcileCh <- localBuffer:
 			default:
 				// nobody is listening
 			}
 			localBuffer = make(domain.AttributeAggregation)
-		case <-ctx.Done():
-			return
-		case <-s.quit:
-			return
+		case job, ok := <-s.jobsCh:
+			if !ok {
+				return // Channel closed, worker should exit
+			}
+			// log.Printf("Worker %d: Processing job", workerID)
+			s.mergeAggregations(job, localBuffer)
 		}
 	}
 }

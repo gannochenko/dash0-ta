@@ -38,7 +38,7 @@ func run(w io.Writer) error {
 	}
 	defer shutdownOtel(ctx)
 
-	attributeProcessorService := attribute_processor.New(configService)
+	attributeProcessorService := attribute_processor.New(configService, log)
 	grpcServer := grpc.NewServer(configService, log, attributeProcessorService)
 	httpServer := http.NewServer(configService, log)
 
