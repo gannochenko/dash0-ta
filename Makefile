@@ -6,3 +6,6 @@ run_log_processor:
 
 run:
 	docker compose up
+
+run_loadtest:
+	k6 run ./apps/log-bombarder/index.js

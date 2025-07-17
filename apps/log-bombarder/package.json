@@ -1,0 +1,14 @@
+{
+  "name": "log-bombarder",
+  "version": "1.0.0",
+  "description": "k6 load testing app to bombard log processor with OpenTelemetry log data",
+  "main": "bombarder.js",
+  "scripts": {
+    "start": "k6 run bombarder.js",
+    "install-k6": "npm install -g k6"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "author": "",
+  "license": "MIT"
+}
