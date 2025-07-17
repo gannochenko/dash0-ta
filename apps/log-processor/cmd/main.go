@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	"log-processor/internal/grpc"
+	"log-processor/internal/http"
 	"log-processor/internal/lib"
 	"log-processor/internal/lib/otel"
 	"log-processor/internal/services/attribute_processor"
@@ -39,20 +40,32 @@ func run(w io.Writer) error {
 
 	attributeProcessorService := attribute_processor.New(configService)
 	grpcServer := grpc.NewServer(configService, log, attributeProcessorService)
+	httpServer := http.NewServer(configService, log)
 
 	var shutdownSequenceWg sync.WaitGroup
-	shutdownSequenceWg.Add(1)
+	shutdownSequenceWg.Add(2)
 
 	return lib.Run(ctx, func() error {
 		attributeProcessorService.Start(ctx)
 
+		// Start gRPC server
 		go func() {
+			defer shutdownSequenceWg.Done()
 			err := grpcServer.Start(ctx)
 			if err != nil {
 				// todo: tighten this error handling
 				log.ErrorContext(ctx, err.Error())
 			}
-			shutdownSequenceWg.Done()
+		}()
+
+		// Start HTTP server
+		go func() {
+			defer shutdownSequenceWg.Done()
+			err := httpServer.Start(ctx)
+			if err != nil {
+				// todo: tighten this error handling
+				log.ErrorContext(ctx, err.Error())
+			}
 		}()
 
 		return nil
@@ -60,6 +73,7 @@ func run(w io.Writer) error {
 		cancel()
 		shutdownOtel(ctx)
 		grpcServer.Stop()
+		httpServer.Stop(ctx)
 
 		attributeProcessorService.Stop()
 

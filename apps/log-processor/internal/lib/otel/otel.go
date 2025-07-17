@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
@@ -104,17 +105,15 @@ func newTraceProvider() (*trace.TracerProvider, error) {
 }
 
 func newMeterProvider() (*metric.MeterProvider, error) {
-	// todo: add metrics or maybe... prometheus?
-	// metricExporter, err := stdoutmetric.New(stdoutmetric.WithPrettyPrint())
-	// if err != nil {
-	// 	return nil, err
-	// }
+	// Use Prometheus exporter for metrics
+	metricExporter, err := prometheus.New()
+	if err != nil {
+		return nil, err
+	}
 
 	meterProvider := metric.NewMeterProvider(
 		metric.WithResource(res),
-		// metric.WithReader(metric.NewPeriodicReader(metricExporter,
-		// 	// Default is 1m. Set to 10s for demonstrative purposes.
-		// 	metric.WithInterval(10*time.Second))),
+		metric.WithReader(metricExporter),
 	)
 	return meterProvider, nil
 }

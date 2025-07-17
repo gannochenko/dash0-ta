@@ -1,0 +1,53 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Log Processor Metrics",
+    "tags": ["log-processor"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "HTTP Requests",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(promhttp_metric_handler_requests_total[5m])",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Go Runtime Metrics",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "go_memstats_alloc_bytes",
+            "legendFormat": "Memory Allocated"
+          },
+          {
+            "expr": "go_goroutines",
+            "legendFormat": "Goroutines"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      }
+    ],
+    "time": {
+      "from": "now-5m",
+      "to": "now"
+    },
+    "refresh": "1s"
+  }
+}

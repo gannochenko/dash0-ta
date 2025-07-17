@@ -18,6 +18,8 @@ type Service struct {
 
 	workerCount int
 	jobsCh        chan domain.AttributeAggregation
+
+	reconcilerTicker *time.Ticker
 	reconcileCh chan domain.AttributeAggregation
 
 	workersWg     sync.WaitGroup
@@ -78,6 +80,8 @@ func (s *Service) Start(ctx context.Context) {
         }
     }()
 
+	s.reconcilerTicker = time.NewTicker(100 * time.Millisecond)
+
 	// reconciler
 	go func() {
 		for {
@@ -86,7 +90,7 @@ func (s *Service) Start(ctx context.Context) {
 				return
 			case <-s.quit:
 				return
-			default:
+			case <-s.reconcilerTicker.C:
 				if len(s.reconcileCh) == cap(s.reconcileCh) {
 					resultBuffer := make(domain.AttributeAggregation)
 					for len(s.reconcileCh) > 0 {
@@ -116,6 +120,7 @@ func (s *Service) Stop() {
 	close(s.jobsCh)
 	s.workersWg.Wait()
 	s.flushTicker.Stop()
+	s.reconcilerTicker.Stop()
 	// close(s.results)
 }
 
