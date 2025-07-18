@@ -6,6 +6,12 @@ services:
       - "443:443" # gRPC endpoint
     env_file:
       - .env.local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+        reservations:
+          cpus: "0.25"
     networks:
       - monitoring
 

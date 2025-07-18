@@ -19,7 +19,6 @@ type Service struct {
 
 	jobsCh chan domain.LogJob
 	valueCh chan string
-	quit chan struct{}
 
 	flushTicker *time.Ticker
 
@@ -33,7 +32,6 @@ func New(config interfaces.ConfigService, log *slog.Logger) *Service {
 
 		jobsCh: make(chan domain.LogJob),
 		valueCh: make(chan string),
-		quit: make(chan struct{}),
 
 		aggregation: make(map[string]int32),
 	}
@@ -65,7 +63,6 @@ func (s *Service) Start(ctx context.Context) {
 
 // Stop gracefully shuts down the worker pool
 func (s *Service) Stop() {
-	close(s.quit)
 	close(s.jobsCh)
 	close(s.valueCh)
 	s.flushTicker.Stop()
@@ -101,8 +98,6 @@ func (s *Service) aggregator(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-s.quit:
 			return
 		case <-s.flushTicker.C:
 			s.printAggregation()

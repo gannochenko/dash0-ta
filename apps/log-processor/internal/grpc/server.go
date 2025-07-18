@@ -24,7 +24,7 @@ func NewServer(configService interfaces.ConfigService, log *slog.Logger, attribu
 	opts := grpc.ChainUnaryInterceptor(
 		GetRequestLogger(log),
 		MapError,
-				// todo: add all these interceptors
+		// todo: add all these interceptors
 		// grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		// grpc.MaxRecvMsgSize(configService.GetConfig().GRPC.MaxReceiveMessageSize),
 		// grpc.Creds(insecure.NewCredentials()),
