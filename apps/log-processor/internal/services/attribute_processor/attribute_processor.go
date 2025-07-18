@@ -2,6 +2,7 @@ package attribute_processor
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log-processor/internal/domain"
 	"log-processor/internal/interfaces"
@@ -116,28 +117,46 @@ func (s *Service) extractAttribute(job domain.LogJob) {
 	attributeName := s.config.GetConfig().AttributeName
 
 	for _, resourceLog := range job {
+		resourceValue := ""
+		
 		if resourceLog.Resource != nil {
 			for _, attr := range resourceLog.Resource.Attributes {
 				if attr.Key == attributeName {
-					s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+					// s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+					resourceValue = proto.StringifyAttributeValue(attr.Value)
 				}
 			}
 		}
 
 		for _, scopeLog := range resourceLog.ScopeLogs {
+			scopeValue := resourceValue
+
 			if scopeLog.Scope != nil {
 				for _, attr := range scopeLog.Scope.Attributes {
 					if attr.Key == attributeName {
-						s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+						// s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+						scopeValue = proto.StringifyAttributeValue(attr.Value)
 					}
 				}
 			}
 
 			for _, logRecord := range scopeLog.LogRecords {
+				logValue := scopeValue
+
 				for _, attr := range logRecord.Attributes {
 					if attr.Key == attributeName {
-						s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+						// s.valueCh <- proto.StringifyAttributeValue(attr.Value)
+						logValue = proto.StringifyAttributeValue(attr.Value)
 					}
+				}
+
+				// hash the log body value and send to valueCh
+				if logRecord.Body != nil {
+					bodyStr := proto.StringifyAttributeValue(logRecord.Body)
+					hash := sha256.Sum256([]byte(bodyStr))
+					s.valueCh <- hash
+				} else {
+					s.valueCh <- logValue
 				}
 			}
 		}

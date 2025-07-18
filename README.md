@@ -1,10 +1,81 @@
-Log structure:
+# Dash0 Sergei Gannochenko test assignment
 
-https://github.com/open-telemetry/opentelemetry-proto/blob/main/examples/logs.json
+## Task
 
-Locking is not an option due to possible contention.
+Design a high-throughput system that analyzes the incoming logs and dumps statistics to STDOUT every N seconds.
 
-## Grafana dashboard
+## Algorithm
+
+From the descriptions I assume, that two log entries are different if their messages are different.
+Thus, in order to calculate the number of different log entries for every distinct attribute value, we keep
+a nested map of value => message => boolean and calculate the amount of keys when reporting to stdout.
+
+Since the attributes present in all 3 sections, the value precedence is enabled: the log-based attribute overrides the scope based and so on.
+
+## Architecture
+
+Since the high througput is requierd, any locking or critical sections is not an option. Instead, let's heavily rely on channels and workers. So:
+
+1. Inside the controllers I avoid doing any computation, instead I immediately send the request to the channel to avoid traffic congestion.
+2. A worker pool (of adjustable size) grinds down jobs coming from the channel, finding `value => message` pairs for a chosen attribute. This is a heavy duty, since the complexity is O(N\*M\*P\*K) (4 nested cycles), so I can increase the amount of workers should the traffic increase. The found values are being sent to another channel.
+3. Another worker reconciles the incoming results into a common data structure, dumps the content of the structure at given interval and cleans the structure up.
+4. No critical section is required, because all operations with data structures are sequential.
+
+## Components
+
+The solution is a cloud native application suitable for running in production. Here are main components:
+
+1. gRPC server exposing the opentelemetry.proto.collector.logs.v1.LogsService/Export method.
+2. Proto definitions compiled into Golang are taken from the Otel package.
+3. Code structure follows the Hexagonal architecture pattern: there domain logic is decoupled into services, and the services are then exposed via "adapters" or "controllers". Thus, gRPC networking is decoupled from the workers.
+4. The code is organized using the dependency injection pattern, the dependencies are passed via interfaces to let the code testable, orthogonal and isolated.
+5. HTTP server exposes the _/metrics_ and _/health_ endpoints to be used by Prometheus and a container-orchestrator-of-your-choice respectively.
+6. The application contains a shutdown sequence to support graceful shutdown.
+7. Structured logging is used to produce some debug output.
+8. Error handler and logger middlewares for the gRPC server are implemented.
+9. Basic Otel is enabled (borrowed from the starter code) to measure CPU/Memory utilization, Goroutine amount.
+10. The config is read from the `.env.local` file, and becomes available in the code through a dedicated Config service.
+
+## How to run
+
+Copy `.env.example` to `.env.local`, adjust the values when needed.
+
+In order to run, just type
+
+```sh
+make run
+```
+
+It will run three containers: the application itself, [Prometheus](http://localhost:9090), [Grafana](http://localhost:3000/dashboards).
+
+To run a 5m loadtest on the solution, type
+
+```sh
+make run_loadtest_long
+```
+
+You need to have [k6](https://k6.io/) installed.
+
+You can go to Grafana, create a dashboard (see Appendix A) to track the operational metrics.
+
+## Further improvements
+
+Since I am running out of time, the following was left out of scope:
+
+1. Additional operational metrics, such as amount of requests per second and error rate may be added.
+2. Brush the code up, move some code to helpers.
+3. Enable max message size and insecure credentials (be careful with that in prod) on the gRPC server.
+4. Add factory methods for dependency creation.
+5. Write unit tests, especially for the part that parses incoming log entries.
+6. Write end-to-end tests to make sure the application functions correctly.
+7. Integration tests may be also written.
+
+## Links
+
+- [Link to the task](https://github.com/dash0hq/take-home-assignments/tree/main/otlp-log-processor-backend-go)
+- [Log structure example](https://github.com/open-telemetry/opentelemetry-proto/blob/main/examples/logs.json)
+
+## Appendix A. Grafana dashboard
 
 ```json
 {
