@@ -18,7 +18,7 @@ Since the high througput is requierd, any locking or critical sections is not an
 
 1. Inside the controllers I avoid doing any computation, instead I immediately send the request to the channel to avoid traffic congestion. The write operation is non-blocking.
 2. A worker pool (of adjustable size) grinds down jobs coming from the _jobs_ channel, finding `value => message` pairs for a chosen attribute. This is a heavy duty, since the complexity is O(N\*M\*P\*K) (4 nested cycles), so I can increase the amount of workers should the traffic increase. The found values are being sent to _result_ channel.
-3. The _jobs_ channel is buffered, because the write operation is non-blocking. This is required, otherwise if all workers are busy, write will be unsuccessful and I loose the data for the hit. If this becomes a choking point, either increase the amount of workers, or the buffer size.
+3. The _jobs_ channel is buffered, because the write operation is blocking with a 1 second timeout. This is required, otherwise if all workers are busy, write will be unsuccessful and I loose the data for the hit. If this becomes a choking point, either increase the amount of workers, or the buffer size.
 4. Another worker reconciles the incoming results into a common data structure, dumps the content of the structure at given interval and cleans the structure up.
 5. No critical section is required, because all operations with data structures are sequential.
 

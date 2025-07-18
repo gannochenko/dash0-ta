@@ -46,8 +46,8 @@ func (s *Service) SubmitJob(job domain.LogJob) error {
 		return errors.New("service is shutting down")
 	case s.jobsCh <- job:
 		return nil
-	case <-time.After(5 * time.Second):	
-		return errors.New("no workers available")
+	case <-time.After(time.Second):	
+		return errors.New("no workers available and the job channel is full")
 	}
 }
 
