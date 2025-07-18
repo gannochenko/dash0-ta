@@ -8,18 +8,19 @@ Design a high-throughput system that analyzes the incoming logs and dumps statis
 
 From the descriptions I assume, that two log entries are different if their messages are different.
 Thus, in order to calculate the number of different log entries for every distinct attribute value, we keep
-a nested map of value => message => boolean and calculate the amount of keys when reporting to stdout.
+a nested map of value => hash(message) => boolean and calculate the amount of keys when reporting to stdout.
 
-Since the attributes present in all 3 sections, the value precedence is enabled: the log-based attribute overrides the scope based and so on.
+Since the attributes present in all 3 sections, the value precedence takes place: the log-based attribute overrides the scope based and so on.
 
 ## Architecture
 
 Since the high througput is requierd, any locking or critical sections is not an option. Instead, let's heavily rely on channels and workers. So:
 
-1. Inside the controllers I avoid doing any computation, instead I immediately send the request to the channel to avoid traffic congestion.
-2. A worker pool (of adjustable size) grinds down jobs coming from the channel, finding `value => message` pairs for a chosen attribute. This is a heavy duty, since the complexity is O(N\*M\*P\*K) (4 nested cycles), so I can increase the amount of workers should the traffic increase. The found values are being sent to another channel.
-3. Another worker reconciles the incoming results into a common data structure, dumps the content of the structure at given interval and cleans the structure up.
-4. No critical section is required, because all operations with data structures are sequential.
+1. Inside the controllers I avoid doing any computation, instead I immediately send the request to the channel to avoid traffic congestion. The write operation is non-blocking.
+2. A worker pool (of adjustable size) grinds down jobs coming from the _jobs_ channel, finding `value => message` pairs for a chosen attribute. This is a heavy duty, since the complexity is O(N\*M\*P\*K) (4 nested cycles), so I can increase the amount of workers should the traffic increase. The found values are being sent to _result_ channel.
+3. The _jobs_ channel is buffered, because the write operation is non-blocking. This is required, otherwise if all workers are busy, write will be unsuccessful and I loose the data for the hit. If this becomes a choking point, either increase the amount of workers, or the buffer size.
+4. Another worker reconciles the incoming results into a common data structure, dumps the content of the structure at given interval and cleans the structure up.
+5. No critical section is required, because all operations with data structures are sequential.
 
 ## Components
 

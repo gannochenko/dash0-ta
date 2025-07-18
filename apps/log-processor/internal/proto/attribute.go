@@ -6,7 +6,7 @@ import (
 	v1 "go.opentelemetry.io/proto/otlp/common/v1"
 )
 
-func StringifyAttributeValue(value *v1.AnyValue) string {
+func StringifyValue(value *v1.AnyValue) string {
 	if value == nil {
 		return ""
 	}

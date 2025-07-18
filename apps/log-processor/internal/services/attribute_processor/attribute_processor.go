@@ -3,6 +3,7 @@ package attribute_processor
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log-processor/internal/domain"
 	"log-processor/internal/interfaces"
@@ -19,11 +20,12 @@ type Service struct {
 	workersWg     sync.WaitGroup
 
 	jobsCh chan domain.LogJob
-	valueCh chan string
+	resultCh chan domain.JobResult
+	quitCh chan struct{}
 
 	flushTicker *time.Ticker
 
-	aggregation map[string]int32
+	aggregation domain.Aggregation
 }
 
 func New(config interfaces.ConfigService, log *slog.Logger) *Service {
@@ -31,19 +33,21 @@ func New(config interfaces.ConfigService, log *slog.Logger) *Service {
 		config: config,
 		log: log,
 
-		jobsCh: make(chan domain.LogJob),
-		valueCh: make(chan string),
+		jobsCh: make(chan domain.LogJob, config.GetConfig().JobChannelSize),
+		resultCh: make(chan domain.JobResult),
 
-		aggregation: make(map[string]int32),
+		aggregation: make(domain.Aggregation),
 	}
 }
 
 func (s *Service) SubmitJob(job domain.LogJob) error {
 	select {
+	case <-s.quitCh:
+		return errors.New("service is shutting down")
 	case s.jobsCh <- job:
 		return nil
-	default:
-		return context.DeadlineExceeded // can't write to the channel, nobody is reading
+	case <-time.After(5 * time.Second):	
+		return errors.New("no workers available")
 	}
 }
 
@@ -59,13 +63,14 @@ func (s *Service) Start(ctx context.Context) {
 	s.workersWg.Add(1)
 	go s.aggregator(ctx)
 
-	s.flushTicker = time.NewTicker(time.Duration(s.config.GetConfig().WindowSize) * time.Second)
+	s.flushTicker = time.NewTicker(time.Duration(s.config.GetConfig().ReportInterval) * time.Second)
 }
 
 // Stop gracefully shuts down the worker pool
 func (s *Service) Stop() {
+	close(s.quitCh)
 	close(s.jobsCh)
-	close(s.valueCh)
+	close(s.resultCh)
 	s.flushTicker.Stop()
 
 	s.workersWg.Wait()
@@ -79,6 +84,8 @@ func (s *Service) worker(ctx context.Context, workerID int) {
 
 	for {
 		select {
+		case <-s.quitCh:
+			return
 		case <-ctx.Done():
 			return
 		case job, ok := <-s.jobsCh:
@@ -98,17 +105,22 @@ func (s *Service) aggregator(ctx context.Context) {
 
 	for {
 		select {
+		case <-s.quitCh:
+			return
 		case <-ctx.Done():
 			return
 		case <-s.flushTicker.C:
-			s.printAggregation()
-			s.aggregation = make(map[string]int32)
-		case value, ok := <-s.valueCh:
+			s.printReport()
+			s.aggregation = make(domain.Aggregation)
+		case value, ok := <-s.resultCh:
 			if !ok {
 				return
 			}
 
-			s.aggregation[value]++
+			if _, ok := s.aggregation[value.Value]; !ok {
+				s.aggregation[value.Value] = make(domain.AggregationData)
+			}
+			s.aggregation[value.Value][value.MessageHash] = true
 		}
 	}
 }
@@ -117,13 +129,12 @@ func (s *Service) extractAttribute(job domain.LogJob) {
 	attributeName := s.config.GetConfig().AttributeName
 
 	for _, resourceLog := range job {
-		resourceValue := ""
-		
+		resourceValue := "[unknown]"
+
 		if resourceLog.Resource != nil {
 			for _, attr := range resourceLog.Resource.Attributes {
 				if attr.Key == attributeName {
-					// s.valueCh <- proto.StringifyAttributeValue(attr.Value)
-					resourceValue = proto.StringifyAttributeValue(attr.Value)
+					resourceValue = proto.StringifyValue(attr.Value)
 				}
 			}
 		}
@@ -134,38 +145,37 @@ func (s *Service) extractAttribute(job domain.LogJob) {
 			if scopeLog.Scope != nil {
 				for _, attr := range scopeLog.Scope.Attributes {
 					if attr.Key == attributeName {
-						// s.valueCh <- proto.StringifyAttributeValue(attr.Value)
-						scopeValue = proto.StringifyAttributeValue(attr.Value)
+						scopeValue = proto.StringifyValue(attr.Value)
 					}
 				}
 			}
 
 			for _, logRecord := range scopeLog.LogRecords {
+				if logRecord.Body == nil {
+					// there is no body, skip the log record
+					continue
+				}
+
 				logValue := scopeValue
 
 				for _, attr := range logRecord.Attributes {
 					if attr.Key == attributeName {
-						// s.valueCh <- proto.StringifyAttributeValue(attr.Value)
-						logValue = proto.StringifyAttributeValue(attr.Value)
+						logValue = proto.StringifyValue(attr.Value)
 					}
 				}
 
-				// hash the log body value and send to valueCh
-				if logRecord.Body != nil {
-					bodyStr := proto.StringifyAttributeValue(logRecord.Body)
-					hash := sha256.Sum256([]byte(bodyStr))
-					s.valueCh <- hash
-				} else {
-					s.valueCh <- logValue
+				s.resultCh <- domain.JobResult{
+					Value: logValue,
+					MessageHash: sha256.Sum256([]byte(proto.StringifyValue(logRecord.Body))),
 				}
 			}
 		}
 	}
 }
 
-func (s *Service) printAggregation() {
-	fmt.Println("==== Aggregation ====")
-	for value, count := range s.aggregation {
-		fmt.Printf("Value: %s, Count: %d\n", value, count)
+func (s *Service) printReport() {
+	fmt.Println("==== Report ====")
+	for value, data := range s.aggregation {
+		fmt.Printf("Value: %s, Count: %d\n", value, len(data))
 	}
 }
