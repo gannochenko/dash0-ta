@@ -29,7 +29,7 @@ The solution is a cloud native application suitable for running in production. H
 1. gRPC server exposing the opentelemetry.proto.collector.logs.v1.LogsService/Export method.
 2. Proto definitions compiled into Golang are taken from the Otel package.
 3. Code structure follows the Hexagonal architecture pattern: there domain logic is decoupled into services, and the services are then exposed via "adapters" or "controllers". Thus, gRPC networking is decoupled from the workers.
-4. The code is organized using the dependency injection pattern, the dependencies are passed via interfaces to let the code testable, orthogonal and isolated.
+4. The code is organized using the dependency injection pattern, the dependencies are passed via interfaces to let the code be testable, orthogonal and isolated.
 5. HTTP server exposes the _/metrics_ and _/health_ endpoints to be used by Prometheus and a container-orchestrator-of-your-choice respectively.
 6. The application contains a shutdown sequence to support graceful shutdown.
 7. Structured logging is used to produce some debug output.
