@@ -57,6 +57,8 @@ make run_loadtest_long
 
 You need to have [k6](https://k6.io/) installed.
 
+On my M1 mac it gave me about 200 requests per second with average latency of 40ms.
+
 You can go to Grafana, create a dashboard (see Appendix A) to track the operational metrics.
 
 ## Further improvements
